@@ -1,37 +1,28 @@
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
+import numpy as np
+import matplotlib.pyplot as plt
+
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
 
+# Загружаем данные
+df = pd.read_excel("C:/Users/user/Downloads/breast+cancer+coimbra/dataR2.xlsx")
 
-DATA_FILE = Path.home() / "Downloads" / "breast+cancer+coimbra" / "dataR2.xlsx"
-FEATURE_COLUMNS = ["Age", "BMI"]
-TARGET_COLUMN = "Classification"
-CLASS_NAMES = {1: "Healthy", 2: "Patient"}
-CLASS_COLORS = {1: "blue", 2: "red"}
+# Выбираем два признака для визуализации и классификации
+X = df[["BMI", "Glucose"]]
+y = df["Classification"]
 
-
-if not DATA_FILE.exists():
-    raise FileNotFoundError(f"Missing dataset: {DATA_FILE}")
-
-df = pd.read_excel(DATA_FILE)
-
-missing_columns = [column for column in [*FEATURE_COLUMNS, TARGET_COLUMN] if column not in df.columns]
-if missing_columns:
-    raise KeyError(f"Missing columns in dataset: {missing_columns}. Available columns: {list(df.columns)}")
-
-X = df[FEATURE_COLUMNS].values
-y = df[TARGET_COLUMN]
-
+# Формируем обучающую и тестовую выборки
+# stratify=y сохраняет доли классов в обеих выборках
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.4, random_state=1, stratify=y
 )
 
-print(df[[*FEATURE_COLUMNS, TARGET_COLUMN]].head())
+print(df[["BMI", "Glucose", "Classification"]].head())
 print()
 print(X.shape, y.shape)
 print()
@@ -39,19 +30,25 @@ print(X_train.shape, y_train.shape)
 print()
 print(X_test.shape, y_test.shape)
 
-knn_model = KNeighborsClassifier(n_neighbors=5)
-knn_model.fit(X_train, y_train)
-y_pred = knn_model.predict(X_test)
-
-print(classification_report(y_test, y_pred, target_names=[CLASS_NAMES[key] for key in sorted(CLASS_NAMES)]))
-print(confusion_matrix(y_test, y_pred))
-print(
-    "Number of mislabeled points out of a total %d points : %d"
-    % (X_test.shape[0], (y_test != y_pred).sum())
+# Применяем метод kNN
+# Так как метод основан на расстояниях, сначала стандартизируем признаки
+KNN_model = Pipeline(
+    [("scaler", StandardScaler()), ("knn", KNeighborsClassifier(n_neighbors=11))]
 )
 
-dat = {"y_Actual": y_test, "y_Predicted": y_pred}
+KNN_model.fit(X_train, y_train)
+y_pred = KNN_model.predict(X_test)
+
+print("Матрица ошибок:")
+print(confusion_matrix(y_test, y_pred, labels=[1, 2]))
+print()
+print("Точность модели:", round(accuracy_score(y_test, y_pred) * 100, 2), "%")
+print("Количество ошибок:", (y_test != y_pred).sum())
+
+# Формируем кросс-валидационную таблицу
+dat = {"y_Actual": y_test.to_numpy(), "y_Predicted": y_pred}
 dff = pd.DataFrame(dat, columns=["y_Actual", "y_Predicted"])
+
 cross_table = pd.crosstab(
     dff["y_Actual"],
     dff["y_Predicted"],
@@ -59,54 +56,47 @@ cross_table = pd.crosstab(
     colnames=["Predicted"],
     margins=True,
 )
+print()
 print(cross_table)
 
-cross_table_display = cross_table.rename(
-    index={key: value for key, value in CLASS_NAMES.items()},
-    columns={key: value for key, value in CLASS_NAMES.items()},
-)
+# Задаём новые точки для прогнозирования
+n = np.array([[21.0, 70.0], [24.0, 82.0], [30.0, 120.0], [35.0, 160.0]])
 
-new_points = np.array([[45, 22.5], [54, 31.2], [62, 27.1], [71, 29.4]])
-new_predictions = knn_model.predict(new_points)
-print("Predictions for new points:", new_predictions)
+# Делаем прогноз для новых точек
+new_points = KNN_model.predict(n)
+print()
+print("Прогноз для новых точек:")
+print(new_points)
 
-point_colors = [CLASS_COLORS.get(label, "gray") for label in y_pred]
+# Визуализируем исходные данные
+plt.figure(figsize=(8, 5))
+colors = ["blue" if cls == 1 else "red" for cls in y]
+plt.scatter(X["BMI"], X["Glucose"], color=colors, linewidths=0.3)
+plt.xlabel("BMI, кг/м²")
+plt.ylabel("Glucose, мг/дл")
+plt.title("Облако точек по двум признакам")
+plt.show()
 
-plt.figure(1)
-plt.scatter(X_test[:, 0], X_test[:, 1], color=point_colors, linewidths=0.1)
-plt.xlabel(FEATURE_COLUMNS[0])
-plt.ylabel(FEATURE_COLUMNS[1])
-plt.title("kNN classification on test data")
+# Визуализируем тестовую выборку
+plt.figure(figsize=(8, 5))
+test_colors = ["blue" if cls == 1 else "red" for cls in y_pred]
+plt.scatter(X_test.iloc[:, 0], X_test.iloc[:, 1], color=test_colors, linewidths=0.3)
+plt.xlabel("BMI, кг/м²")
+plt.ylabel("Glucose, мг/дл")
+plt.title("Результат классификации тестовой выборки")
+plt.show()
 
-plt.figure(2)
-plt.scatter(X_test[:, 0], X_test[:, 1], color=point_colors, linewidths=0.1)
-for index, point in enumerate(new_points, start=1):
-    predicted_class = int(new_predictions[index - 1])
-    plt.scatter(
-        point[0],
-        point[1],
-        color="green",
-        edgecolors=CLASS_COLORS.get(predicted_class, "black"),
-        label=f"Point {index}: {CLASS_NAMES.get(predicted_class, predicted_class)}",
-        linewidths=2,
-    )
-plt.xlabel(FEATURE_COLUMNS[0])
-plt.ylabel(FEATURE_COLUMNS[1])
-plt.title("New points prediction")
+# Визуализируем новые точки
+plt.figure(figsize=(8, 5))
+plt.scatter(X["BMI"], X["Glucose"], color=colors, linewidths=0.2, alpha=0.4)
+
+plt.scatter(n[0, 0], n[0, 1], color="green", label="Точка 1", s=90)
+plt.scatter(n[1, 0], n[1, 1], color="purple", label="Точка 2", s=90)
+plt.scatter(n[2, 0], n[2, 1], color="orange", label="Точка 3", s=90)
+plt.scatter(n[3, 0], n[3, 1], color="brown", label="Точка 4", s=90)
+
+plt.xlabel("BMI, кг/м²")
+plt.ylabel("Glucose, мг/дл")
+plt.title("Новые объекты на плоскости признаков")
 plt.legend()
-
-plt.figure(3, figsize=(7, 3))
-plt.axis("off")
-plt.title("Cross-validation table", pad=12)
-table = plt.table(
-    cellText=cross_table_display.values,
-    rowLabels=cross_table_display.index,
-    colLabels=cross_table_display.columns,
-    cellLoc="center",
-    loc="center",
-)
-table.auto_set_font_size(False)
-table.set_fontsize(10)
-table.scale(1.1, 1.5)
-
 plt.show()
